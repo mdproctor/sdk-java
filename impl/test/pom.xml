@@ -27,6 +27,12 @@
           <artifactId>openworkflow-persistence-mvstore</artifactId>
         </dependency>
         <dependency>
+          <groupId>org.openworkflow.sdk</groupId>
+          <artifactId>openworkflow-coordination</artifactId>
+          <version>${project.version}</version>
+          <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.openworkflow.sdk</groupId>
             <artifactId>openworkflow-impl-http</artifactId>
         </dependency>
