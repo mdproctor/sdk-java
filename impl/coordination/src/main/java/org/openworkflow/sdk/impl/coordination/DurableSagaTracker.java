@@ -22,21 +22,37 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import org.openworkflow.sdk.impl.TaskContextData;
 
 public class DurableSagaTracker implements CoordinationPrimitive {
 
   private final String name;
   private final List<String> stepOrder;
   private final Function<String, String> compensationNaming;
+  private final Predicate<TaskContextData> taskMatcher;
   private final List<String> completedSteps = Collections.synchronizedList(new ArrayList<>());
   private volatile String failedAt;
   private final AtomicLong version = new AtomicLong(0);
 
   public DurableSagaTracker(
-      String name, List<String> stepOrder, Function<String, String> compensationNaming) {
+      String name,
+      List<String> stepOrder,
+      Function<String, String> compensationNaming,
+      Predicate<TaskContextData> taskMatcher) {
     this.name = name;
     this.stepOrder = List.copyOf(stepOrder);
     this.compensationNaming = compensationNaming;
+    this.taskMatcher = taskMatcher;
+  }
+
+  public DurableSagaTracker(
+      String name, List<String> stepOrder, Function<String, String> compensationNaming) {
+    this(name, stepOrder, compensationNaming, t -> false);
+  }
+
+  public boolean matches(TaskContextData task) {
+    return taskMatcher.test(task);
   }
 
   public void stepCompleted(String step) {

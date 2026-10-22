@@ -74,13 +74,9 @@ public class DurableCoordinationListener implements WorkflowExecutionCompletable
     List<CompletableFuture<?>> futures = new ArrayList<>();
     for (CoordinationPrimitive p : primitives.values()) {
       if (p instanceof DurableBarrier barrier && barrier.matches(ev.taskContext())) {
-        futures.add(barrier.arrive(ev.taskContext()));
+        futures.add(barrier.awaitRelease());
       } else if (p instanceof DurableSemaphore sem && sem.matches(ev.taskContext())) {
         sem.release(ev.taskContext());
-      } else if (p instanceof DurableSignal sig && sig.matchesSender(ev.taskContext())) {
-        sig.send(ev.taskContext().taskName());
-      } else if (p instanceof DurableQuorum q && q.matches(ev.taskContext())) {
-        q.complete(ev.taskContext());
       }
     }
     if (futures.isEmpty()) {
@@ -91,6 +87,20 @@ public class DurableCoordinationListener implements WorkflowExecutionCompletable
 
   @Override
   public CompletableFuture<?> onBeforeCheckpoint(CheckpointEvent ev) {
+    for (CoordinationPrimitive p : primitives.values()) {
+      if (p instanceof DurableBarrier barrier && barrier.matches(ev.taskContext())) {
+        barrier.recordArrival(ev.taskContext());
+      }
+      if (p instanceof DurableQuorum q && q.matches(ev.taskContext())) {
+        q.complete(ev.taskContext());
+      }
+      if (p instanceof DurableSignal sig && sig.matchesSender(ev.taskContext())) {
+        sig.send(ev.taskContext().taskName());
+      }
+      if (p instanceof DurableSagaTracker saga && saga.matches(ev.taskContext())) {
+        saga.stepCompleted(ev.taskContext().taskName());
+      }
+    }
     if (primitives.isEmpty()) {
       return CompletableFuture.completedFuture(null);
     }

@@ -44,12 +44,15 @@ public class DurableBarrier implements CoordinationPrimitive {
     return taskMatcher.test(task);
   }
 
-  public CompletableFuture<Void> arrive(TaskContextData task) {
+  public void recordArrival(TaskContextData task) {
     arrived.add(task.taskName());
     version.incrementAndGet();
-    if (arrived.size() >= required) {
+    if (arrived.size() >= required && !releaseFuture.isDone()) {
       releaseFuture.complete(null);
     }
+  }
+
+  public CompletableFuture<Void> awaitRelease() {
     return releaseFuture;
   }
 
