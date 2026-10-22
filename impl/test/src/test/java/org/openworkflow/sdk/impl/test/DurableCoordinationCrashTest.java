@@ -387,17 +387,21 @@ class DurableCoordinationCrashTest {
 
     try (Stream<WorkflowInstance> stream = handlers2.reader().scanAll(def2)) {
       List<WorkflowInstance> instances = stream.toList();
-      if (!instances.isEmpty()) {
-        instances.get(0).start();
-        Thread.sleep(500);
+      assertThat(instances).hasSize(1);
 
-        assertThat(saga2.completedSteps())
-            .as("Pre-crash steps survived restore, workflow continued to complete step4")
-            .contains("step1", "step2", "step3");
-        assertThat(saga2.completedSteps().size())
-            .as("All steps completed after restore (3 pre-crash + step4 on resume)")
-            .isGreaterThanOrEqualTo(3);
-      }
+      WorkflowInstance restored = instances.get(0);
+      restored.start();
+
+      Awaitility.await()
+          .atMost(Duration.ofSeconds(10))
+          .until(() -> restored.status() == WorkflowStatus.COMPLETED);
+
+      assertThat(saga2.completedSteps())
+          .as("Pre-crash steps survived restore, workflow continued to complete step4")
+          .contains("step1", "step2", "step3");
+      assertThat(saga2.completedSteps().size())
+          .as("All steps completed after restore (3 pre-crash + step4 on resume)")
+          .isGreaterThanOrEqualTo(3);
     } finally {
       app2.close();
       handlers2.close();
