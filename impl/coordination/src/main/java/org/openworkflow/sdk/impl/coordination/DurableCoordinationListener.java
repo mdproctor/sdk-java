@@ -63,7 +63,6 @@ public class DurableCoordinationListener implements WorkflowExecutionCompletable
 
   @Override
   public CompletableFuture<?> onTaskStarted(TaskStartedEvent ev) {
-    restoreFromMetadata(ev.workflowContext());
     List<CompletableFuture<?>> futures = new ArrayList<>();
     for (CoordinationPrimitive p : primitives.values()) {
       if (p instanceof DurableSemaphore sem && sem.matches(ev.taskContext())) {
@@ -86,6 +85,7 @@ public class DurableCoordinationListener implements WorkflowExecutionCompletable
 
   @Override
   public CompletableFuture<?> onTaskCompleted(TaskCompletedEvent ev) {
+    restoreFromMetadata(ev.workflowContext());
     for (CoordinationPrimitive p : primitives.values()) {
       if (p instanceof DurableBarrier barrier && barrier.matches(ev.taskContext())) {
         barrier.recordArrival(ev.taskContext());
@@ -111,7 +111,6 @@ public class DurableCoordinationListener implements WorkflowExecutionCompletable
     }
     var found = ctx.instance().findMetadata(COORDINATION_KEY, String.class);
     if (found.isEmpty()) {
-      restored = true;
       return;
     }
     try {

@@ -196,4 +196,142 @@ class MetadataPersistenceTest {
         .as("Metadata counter should be restored from pre-crash state")
         .isNotEmpty();
   }
+
+  @Test
+  @DisplayName("Fork metadata survives crash/restore")
+  void forkMetadataSurvivesCrashRestore() throws Exception {
+    String dbPath = tempDir.resolve("fork-meta.db").toString();
+    CountDownLatch twoDone = new CountDownLatch(2);
+
+    Workflow workflow =
+        WorkflowBuilder.workflow("fork-meta", "test", "0.1.0")
+            .tasks(
+                doTasks(
+                    fork(
+                        "parallel",
+                        f ->
+                            f.compete(false)
+                                .branch("fast", b -> b.set("workFast", s -> s.put("done", "fast")))
+                                .branch(
+                                    "medium",
+                                    b ->
+                                        b.wait("d1", w -> w.wait(Duration.ofMillis(50)))
+                                            .set("workMedium", s -> s.put("done", "medium")))
+                                .branch(
+                                    "slow",
+                                    b ->
+                                        b.wait("d2", w -> w.wait(Duration.ofMillis(100)))
+                                            .set("workSlow", s -> s.put("done", "slow"))))))
+            .build();
+
+    WorkflowExecutionCompletableListener metaSetter =
+        new WorkflowExecutionCompletableListener() {
+          @Override
+          public int priority() {
+            return 500;
+          }
+
+          @Override
+          public CompletableFuture<?> onTaskCompleted(TaskCompletedEvent ev) {
+            WorkflowContext ctx = (WorkflowContext) ev.workflowContext();
+            String taskName = ev.taskContext().taskName();
+            if (taskName.startsWith("work")) {
+              ctx.instance().removeMetadata("arrivals");
+              String current = ctx.instance().findMetadata("arrivals", String.class).orElse("");
+              String updated = current.isEmpty() ? taskName : current + "," + taskName;
+              ctx.instance().addMetadataIfAbsent("arrivals", () -> updated);
+              System.out.println("FORK SET: arrivals=" + updated + " task=" + taskName);
+              twoDone.countDown();
+            }
+            return CompletableFuture.completedFuture(null);
+          }
+
+          @Override
+          public CompletableFuture<?> onTaskStarted(TaskStartedEvent ev) {
+            if (ev.taskContext().taskName().equals("workSlow")) return new CompletableFuture<>();
+            return CompletableFuture.completedFuture(null);
+          }
+        };
+
+    ExecutorService exec1 = Executors.newSingleThreadExecutor();
+    PersistenceInstanceHandlers handlers1 =
+        DefaultPersistenceInstanceHandlers.builder(new MVStorePersistenceStore(dbPath))
+            .withExecutorService(exec1)
+            .build();
+    WorkflowApplication app1 =
+        PersistenceApplicationBuilder.builder(
+                WorkflowApplication.builder().withId(APP_ID).withListener(metaSetter),
+                handlers1.writer())
+            .build();
+    app1.workflowDefinition(workflow).instance(Map.of()).start();
+    assertThat(twoDone.await(5, TimeUnit.SECONDS)).as("two work tasks done").isTrue();
+    Thread.sleep(200);
+    app1.close();
+    handlers1.close();
+    exec1.shutdownNow();
+
+    StringBuilder restoredArrivals = new StringBuilder();
+    WorkflowExecutionCompletableListener restoreChecker =
+        new WorkflowExecutionCompletableListener() {
+          @Override
+          public int priority() {
+            return 500;
+          }
+
+          @Override
+          public CompletableFuture<?> onTaskStarted(TaskStartedEvent ev) {
+            WorkflowContext ctx = (WorkflowContext) ev.workflowContext();
+            System.out.println(
+                "FORK RESTORE onTaskStarted: task="
+                    + ev.taskContext().taskName()
+                    + " keys="
+                    + ctx.instance().metadata().keySet()
+                    + " arrivals="
+                    + ctx.instance().findMetadata("arrivals", String.class));
+            ctx.instance()
+                .findMetadata("arrivals", String.class)
+                .ifPresent(
+                    v -> {
+                      if (restoredArrivals.isEmpty()) restoredArrivals.append(v);
+                    });
+            return CompletableFuture.completedFuture(null);
+          }
+
+          @Override
+          public CompletableFuture<?> onTaskCompleted(TaskCompletedEvent ev) {
+            return CompletableFuture.completedFuture(null);
+          }
+        };
+
+    ExecutorService exec2 = Executors.newSingleThreadExecutor();
+    PersistenceInstanceHandlers handlers2 =
+        DefaultPersistenceInstanceHandlers.builder(new MVStorePersistenceStore(dbPath))
+            .withExecutorService(exec2)
+            .build();
+    WorkflowApplication app2 =
+        PersistenceApplicationBuilder.builder(
+                WorkflowApplication.builder().withId(APP_ID).withListener(restoreChecker),
+                handlers2.writer())
+            .build();
+    WorkflowDefinition def2 = app2.workflowDefinition(workflow);
+    try (Stream<WorkflowInstance> stream = handlers2.reader().scanAll(def2)) {
+      List<WorkflowInstance> instances = stream.toList();
+      System.out.println("FORK RESTORE: found " + instances.size() + " instances");
+      assertThat(instances).hasSize(1);
+      WorkflowInstance restored = instances.get(0);
+      restored.start();
+      Awaitility.await()
+          .atMost(Duration.ofSeconds(10))
+          .until(() -> restored.status() == WorkflowStatus.COMPLETED);
+      System.out.println("FORK RESTORE complete: arrivals=" + restoredArrivals);
+    } finally {
+      app2.close();
+      handlers2.close();
+      exec2.shutdownNow();
+    }
+
+    assertThat(restoredArrivals.toString())
+        .as("Fork metadata should survive crash/restore")
+        .isNotEmpty();
+  }
 }
