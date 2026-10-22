@@ -109,7 +109,7 @@ public class WorkflowPersistenceInstance extends WorkflowMutableInstance {
       }
     }
     Instant taskCompletedAt =
-        (taskInfo instanceof CompletedTaskInfo ci) ? ci.instant() : Instant.MIN;
+        taskInfo instanceof CompletedTaskInfo ci ? ci.instant() : Instant.MIN;
     Set<String> retainKeys;
     synchronized (userMetaKeys) {
       retainKeys = new HashSet<>(userMetaKeys);
