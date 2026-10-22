@@ -15,14 +15,15 @@
  */
 package org.openworkflow.sdk.impl.coordination;
 
+import java.util.AbstractMap;
+import java.util.ArrayDeque;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import org.openworkflow.sdk.impl.TaskContextData;
@@ -33,7 +34,7 @@ public class DurableSemaphore implements CoordinationPrimitive {
   private final int maxPermits;
   private final Predicate<TaskContextData> taskMatcher;
   private final Set<String> holders = ConcurrentHashMap.newKeySet();
-  private final Queue<CompletableFuture<Void>> waitQueue = new ConcurrentLinkedQueue<>();
+  private final Deque<Map.Entry<String, CompletableFuture<Void>>> waitQueue = new ArrayDeque<>();
   private final AtomicLong version = new AtomicLong(0);
 
   public DurableSemaphore(String name, int maxPermits, Predicate<TaskContextData> taskMatcher) {
@@ -54,13 +55,7 @@ public class DurableSemaphore implements CoordinationPrimitive {
         return CompletableFuture.completedFuture(null);
       }
       CompletableFuture<Void> waiter = new CompletableFuture<>();
-      String taskName = task.taskName();
-      waiter.thenRun(
-          () -> {
-            holders.add(taskName);
-            version.incrementAndGet();
-          });
-      waitQueue.add(waiter);
+      waitQueue.add(new AbstractMap.SimpleEntry<>(task.taskName(), waiter));
       return waiter;
     }
   }
@@ -69,9 +64,11 @@ public class DurableSemaphore implements CoordinationPrimitive {
     synchronized (this) {
       holders.remove(task.taskName());
       version.incrementAndGet();
-      CompletableFuture<Void> next = waitQueue.poll();
+      Map.Entry<String, CompletableFuture<Void>> next = waitQueue.poll();
       if (next != null) {
-        next.complete(null);
+        holders.add(next.getKey());
+        version.incrementAndGet();
+        next.getValue().complete(null);
       }
     }
   }

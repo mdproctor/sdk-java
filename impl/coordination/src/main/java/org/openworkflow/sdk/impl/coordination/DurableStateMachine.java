@@ -49,7 +49,7 @@ public class DurableStateMachine implements CoordinationPrimitive {
     return taskMatcher.test(task);
   }
 
-  public boolean transition(TaskContextData task) {
+  public synchronized boolean transition(TaskContextData task) {
     String taskName = task.taskName();
     String[] parts = taskName.split("_");
     if (parts.length < 3) {
@@ -63,7 +63,8 @@ public class DurableStateMachine implements CoordinationPrimitive {
       return false;
     }
 
-    if (current.compareAndSet(from, to)) {
+    if (current.get().equals(from)) {
+      current.set(to);
       transitionLog.add(from + " → " + to);
       version.incrementAndGet();
       return true;
