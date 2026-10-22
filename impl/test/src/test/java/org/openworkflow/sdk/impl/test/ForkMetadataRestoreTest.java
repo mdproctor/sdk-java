@@ -140,14 +140,16 @@ class ForkMetadataRestoreTest {
                 handlers1.writer())
             .build();
 
-    app1.workflowDefinition(workflow).instance(Map.of()).start();
-    assertThat(twoVotesCast.await(5, TimeUnit.SECONDS)).isTrue();
-    Thread.sleep(200);
-
-    // CRASH — voterX and voterA are persisted, voterZ is not
-    app1.close();
-    handlers1.close();
-    exec1.shutdownNow();
+    try {
+      app1.workflowDefinition(workflow).instance(Map.of()).start();
+      assertThat(twoVotesCast.await(5, TimeUnit.SECONDS)).isTrue();
+      Thread.sleep(200);
+    } finally {
+      // CRASH — voterX and voterA are persisted, voterZ is not
+      app1.close();
+      handlers1.close();
+      exec1.shutdownNow();
+    }
 
     // Persisted metadata snapshots:
     //   voterX's snapshot: votes = "voterX"          (voted first)
