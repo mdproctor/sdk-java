@@ -110,6 +110,13 @@ public class DurableCoordinationListener implements WorkflowExecutionCompletable
       return;
     }
     var found = ctx.instance().findMetadata(COORDINATION_KEY, String.class);
+    System.out.println(
+        "RESTORE-DEBUG: findMetadata="
+            + found
+            + " keys="
+            + ctx.instance().metadata().keySet()
+            + " globalVersion="
+            + globalVersion.get());
     if (found.isEmpty()) {
       return;
     }
