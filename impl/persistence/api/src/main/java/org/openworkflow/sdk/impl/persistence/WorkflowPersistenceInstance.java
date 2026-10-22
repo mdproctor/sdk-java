@@ -15,7 +15,10 @@
  */
 package org.openworkflow.sdk.impl.persistence;
 
+import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -34,6 +37,7 @@ public class WorkflowPersistenceInstance extends WorkflowMutableInstance {
 
   private final PersistenceWorkflowInfo info;
   private Set<String> userMetaKeys = new HashSet<>();
+  private final Map<String, Instant> metadataWriteTimestamps = new HashMap<>();
 
   public static WorkflowInstance of(WorkflowDefinition definition, PersistenceWorkflowInfo info) {
     return definition
@@ -104,6 +108,8 @@ public class WorkflowPersistenceInstance extends WorkflowMutableInstance {
         searchContext = tryContext.parent();
       }
     }
+    Instant taskCompletedAt =
+        (taskInfo instanceof CompletedTaskInfo ci) ? ci.instant() : Instant.MIN;
     Set<String> retainKeys;
     synchronized (userMetaKeys) {
       retainKeys = new HashSet<>(userMetaKeys);
@@ -112,7 +118,11 @@ public class WorkflowPersistenceInstance extends WorkflowMutableInstance {
           .forEach(
               (k, v) -> {
                 if (!retainKeys.contains(k)) {
-                  additionalObjects.put(k, v);
+                  Instant lastWrite = metadataWriteTimestamps.get(k);
+                  if (lastWrite == null || !taskCompletedAt.isBefore(lastWrite)) {
+                    additionalObjects.put(k, v);
+                    metadataWriteTimestamps.put(k, taskCompletedAt);
+                  }
                   retainKeys.add(k);
                 }
               });
